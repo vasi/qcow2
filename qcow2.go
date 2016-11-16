@@ -8,6 +8,8 @@ import (
 )
 
 type Qcow2 interface {
+	Guest() Guest
+	ClusterSize() int
 }
 
 type qcow2 struct {
@@ -28,4 +30,12 @@ func New(r io.ReaderAt) (Qcow2, error) {
 	}
 
 	return q, nil
+}
+
+func (q *qcow2) Guest() Guest {
+	return &guestImpl{q, int64(q.header.L1TableOffset), int(q.header.L1Size)}
+}
+
+func (q *qcow2) ClusterSize() int {
+	return 1 << q.header.ClusterBits
 }
