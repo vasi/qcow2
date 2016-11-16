@@ -1,0 +1,26 @@
+base
+  reading
+  FUSE
+  ext4
+  discard
+  compact
+extra
+  error handling
+  profiling
+  qcow2
+    features parsing
+    writing
+      safe refcount growth
+    snapshots
+    COW
+    creation
+    compression
+    backing files
+  hole punching
+  ignore zero writes
+  threading
+  fuse arguments (C api?)
+  libext2fs
+  multi-mount protection
+  tests
+  portability
