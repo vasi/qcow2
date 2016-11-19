@@ -1,6 +1,7 @@
 package qcow2
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 type header interface {
 	open(ReaderWriterAt) error
 	close() error
+
+	write() error
 
 	clusterSize() int
 
@@ -201,6 +204,56 @@ func (h *headerImpl) readExtensions(r *io.SectionReader) error {
 				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+func (h *headerImpl) write() error {
+	h.v3.AutoclearFeatures &= autoclearKnown
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.BigEndian, h.v2); err != nil {
+		return err
+	}
+	if err := binary.Write(&buf, binary.BigEndian, h.v3); err != nil {
+		return err
+	}
+	if h.extraHeader != nil {
+		if _, err := buf.Write(h.extraHeader); err != nil {
+			return err
+		}
+	}
+	for extensionId, data := range h.extensions {
+		if err := binary.Write(&buf, binary.BigEndian, extensionId); err != nil {
+			return err
+		}
+		var extensionSize uint32 = uint32(len(data))
+		if err := binary.Write(&buf, binary.BigEndian, extensionSize); err != nil {
+			return err
+		}
+		if _, err := buf.Write(data); err != nil {
+			return err
+		}
+		for ; extensionSize%8 != 0; extensionSize++ {
+			if err := buf.WriteByte(0); err != nil {
+				return err
+			}
+		}
+	}
+	var end uint32 = 0
+	if err := binary.Write(&buf, binary.BigEndian, end); err != nil {
+		return err
+	}
+
+	// Check the total size
+	if buf.Len() > h.clusterSize() {
+		return errors.New("Header too large")
+	}
+
+	// Write the header
+	if _, err := h.ioAt.WriteAt(buf.Bytes(), 0); err != nil {
+		return err
 	}
 
 	return nil

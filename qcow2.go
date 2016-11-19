@@ -1,12 +1,15 @@
 package qcow2
 
 import "io"
+import "log"
 
 type Qcow2 interface {
 	io.Closer
 
 	Guest() Guest
 	ClusterSize() int
+
+	XXX()
 }
 
 type qcow2 struct {
@@ -38,4 +41,10 @@ func (q *qcow2) ClusterSize() int {
 
 func (q *qcow2) Close() error {
 	return q.header.close()
+}
+
+func (q *qcow2) XXX() {
+	if err := q.header.write(); err != nil {
+		log.Fatal(err)
+	}
 }
