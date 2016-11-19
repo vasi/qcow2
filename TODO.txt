@@ -1,6 +1,5 @@
 base
   use interfaces everywhere!
-  reading
   FUSE
   ext4
   discard
@@ -9,6 +8,7 @@ extra
   error handling
   profiling
   qcow2
+    feature names
     features parsing
     writing
       safe refcount growth
@@ -19,7 +19,7 @@ extra
     backing files
   hole punching
   ignore zero writes
-  threading
+  thread safety
   fuse arguments (C api?)
   libext2fs
   multi-mount protection

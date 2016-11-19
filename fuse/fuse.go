@@ -6,7 +6,6 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
-	"github.com/k0kubun/pp"
 	"github.com/vasi/qcow2"
 	"golang.org/x/net/context"
 )
@@ -17,7 +16,7 @@ type file struct {
 
 func (f file) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Mode = 0444
-	a.Size = f.guest.Size()
+	a.Size = uint64(f.guest.Size())
 	return nil
 }
 
@@ -37,11 +36,11 @@ func main() {
 	}
 	defer f.Close()
 
-	q, err := qcow2.New(f)
+	q, err := qcow2.Open(f)
 	if err != nil {
 		log.Fatal(err)
 	}
-	pp.Println(q)
+	defer q.Close()
 	guest := q.Guest()
 
 	conn, err := fuse.Mount(
