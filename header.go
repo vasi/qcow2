@@ -210,6 +210,10 @@ func (h *headerImpl) readExtensions(r *io.SectionReader) error {
 }
 
 func (h *headerImpl) write() error {
+	if h.v3.IncompatibleFeatures&featureDirty != 0 {
+		return errors.New("Don't know how to write with dirty refcounts")
+	}
+
 	h.v3.AutoclearFeatures &= autoclearKnown
 
 	var buf bytes.Buffer

@@ -15,7 +15,7 @@ type file struct {
 }
 
 func (f file) Attr(ctx context.Context, a *fuse.Attr) error {
-	a.Mode = 0444
+	a.Mode = 0644
 	a.Size = uint64(f.guest.Size())
 	return nil
 }
@@ -29,8 +29,17 @@ func (f file) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadRe
 	return err
 }
 
+func (f file) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
+	n, err := f.guest.WriteAt(req.Data, req.Offset)
+	if err != nil {
+		log.Print(err)
+	}
+	resp.Size = n
+	return err
+}
+
 func main() {
-	f, err := os.Open(os.Args[1])
+	f, err := os.OpenFile(os.Args[1], os.O_RDWR, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -1,12 +1,13 @@
 package qcow2
 
 import (
+	"bytes"
 	"errors"
 	"io"
 )
 
 type Guest interface {
-	io.ReaderAt
+	ReaderWriterAt
 	Size() int64
 }
 
@@ -80,7 +81,35 @@ func (g *guestImpl) readCluster(p []byte, idx int, off int) error {
 	return nil
 }
 
-func (g *guestImpl) ReadAt(p []byte, off int64) (n int, err error) {
+func (g *guestImpl) writeCluster(p []byte, idx int, off int) error {
+	clusterStart, err := g.lookupCluster(idx)
+	if err != nil {
+		return err
+	}
+
+	if clusterStart == 0 {
+		return errors.New("Allocating sectors not yet implemented")
+	} else {
+		// Do nothing if there are no changes.
+		pos := clusterStart + int64(off)
+		cmp := make([]byte, len(p))
+		if _, err := g.ioAt.ReadAt(cmp, pos); err != nil {
+			return err
+		}
+		if bytes.Compare(p, cmp) == 0 {
+			return nil
+		}
+
+		if _, err := g.ioAt.WriteAt(p, pos); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type clusterFunc func(g *guestImpl, p []byte, idx int, off int) error
+
+func (g *guestImpl) perCluster(p []byte, off int64, f clusterFunc) (n int, err error) {
 	if off+int64(len(p)) > g.size {
 		return 0, io.ErrUnexpectedEOF
 	}
@@ -93,7 +122,7 @@ func (g *guestImpl) ReadAt(p []byte, off int64) (n int, err error) {
 		if length > len(p) {
 			length = len(p)
 		}
-		if err = g.readCluster(p[:length], idx, offset); err != nil {
+		if err = f(g, p[:length], idx, offset); err != nil {
 			return
 		}
 		p = p[length:]
@@ -102,6 +131,14 @@ func (g *guestImpl) ReadAt(p []byte, off int64) (n int, err error) {
 		n += length
 	}
 	return n, nil
+}
+
+func (g *guestImpl) ReadAt(p []byte, off int64) (n int, err error) {
+	return g.perCluster(p, off, (*guestImpl).readCluster)
+}
+
+func (g *guestImpl) WriteAt(p []byte, off int64) (n int, err error) {
+	return g.perCluster(p, off, (*guestImpl).writeCluster)
 }
 
 func (g *guestImpl) Size() int64 {
