@@ -81,6 +81,10 @@ func (g *guestImpl) readCluster(p []byte, idx int, off int) error {
 }
 
 func (g *guestImpl) ReadAt(p []byte, off int64) (n int, err error) {
+	if off+int64(len(p)) > g.size {
+		return 0, io.ErrUnexpectedEOF
+	}
+
 	idx := int(off / int64(g.clusterSize))
 	offset := int(off % int64(g.clusterSize))
 	n = 0
