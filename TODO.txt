@@ -1,3 +1,5 @@
+write header on first write
+
 base
   use interfaces everywhere!
   FUSE

@@ -7,6 +7,8 @@ import (
 )
 
 type Guest interface {
+	Open(header header, l1 int64, size int64)
+
 	ReaderWriterAt
 	Size() int64
 }
@@ -19,18 +21,36 @@ const (
 )
 
 type guestImpl struct {
-	ioAt        ioAt
-	size        int64
-	clusterSize int
-	l1_position int64
-	l1_clusters int
+	header     header
+	l1Position int64
+	size       int64
+	didWrite   bool
 }
 
-func (g *guestImpl) lookupCluster(idx int) (int64, error) {
-	l2Entries := g.clusterSize / 8
+func (g *guestImpl) Open(header header, l1 int64, size int64) {
+	g.header = header
+	g.l1Position = l1
+	g.size = size
+	g.didWrite = false
+}
 
-	l1Offset := g.l1_position + int64(idx/l2Entries*8)
-	l1, err := g.ioAt.read64(l1Offset)
+func (g *guestImpl) Close() {
+
+}
+
+func (g *guestImpl) io() *ioAt {
+	return g.header.io()
+}
+
+func (g *guestImpl) clusterSize() int {
+	return g.header.clusterSize()
+}
+
+func (g *guestImpl) lookupCluster(idx int64) (int64, error) {
+	l2Entries := int64(g.clusterSize() / 8)
+
+	l1Offset := g.l1Position + idx/l2Entries*8
+	l1, err := g.io().read64(l1Offset)
 	if err != nil {
 		return 0, err
 	}
@@ -41,8 +61,8 @@ func (g *guestImpl) lookupCluster(idx int) (int64, error) {
 		return 0, nil
 	}
 
-	l2Offset := int64(l1&^cow) + int64((idx%l2Entries)*8)
-	l2, err := g.ioAt.read64(l2Offset)
+	l2Offset := int64(l1&^cow) + idx%l2Entries*8
+	l2, err := g.io().read64(l2Offset)
 	if err != nil {
 		return 0, err
 	}
@@ -65,7 +85,7 @@ func zeroFill(p []byte) {
 	}
 }
 
-func (g *guestImpl) readCluster(p []byte, idx int, off int) error {
+func (g *guestImpl) readCluster(p []byte, idx int64, off int) error {
 	clusterStart, err := g.lookupCluster(idx)
 	if err != nil {
 		return err
@@ -74,14 +94,21 @@ func (g *guestImpl) readCluster(p []byte, idx int, off int) error {
 	if clusterStart == 0 {
 		zeroFill(p)
 	} else {
-		if _, err := g.ioAt.ReadAt(p, clusterStart+int64(off)); err != nil {
+		if _, err := g.io().ReadAt(p, clusterStart+int64(off)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (g *guestImpl) writeCluster(p []byte, idx int, off int) error {
+func (g *guestImpl) writeCluster(p []byte, idx int64, off int) error {
+	if !g.didWrite {
+		if err := g.header.write(); err != nil {
+			return err
+		}
+		g.didWrite = true
+	}
+
 	clusterStart, err := g.lookupCluster(idx)
 	if err != nil {
 		return err
@@ -93,32 +120,32 @@ func (g *guestImpl) writeCluster(p []byte, idx int, off int) error {
 		// Do nothing if there are no changes.
 		pos := clusterStart + int64(off)
 		cmp := make([]byte, len(p))
-		if _, err := g.ioAt.ReadAt(cmp, pos); err != nil {
+		if _, err := g.io().ReadAt(cmp, pos); err != nil {
 			return err
 		}
 		if bytes.Compare(p, cmp) == 0 {
 			return nil
 		}
 
-		if _, err := g.ioAt.WriteAt(p, pos); err != nil {
+		if _, err := g.io().WriteAt(p, pos); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-type clusterFunc func(g *guestImpl, p []byte, idx int, off int) error
+type clusterFunc func(g *guestImpl, p []byte, idx int64, off int) error
 
 func (g *guestImpl) perCluster(p []byte, off int64, f clusterFunc) (n int, err error) {
 	if off+int64(len(p)) > g.size {
 		return 0, io.ErrUnexpectedEOF
 	}
 
-	idx := int(off / int64(g.clusterSize))
-	offset := int(off % int64(g.clusterSize))
+	idx := int64(off / int64(g.clusterSize()))
+	offset := int(off % int64(g.clusterSize()))
 	n = 0
 	for len(p) > 0 {
-		length := g.clusterSize - offset
+		length := g.clusterSize() - offset
 		if length > len(p) {
 			length = len(p)
 		}

@@ -20,7 +20,11 @@ type header interface {
 	l1Offset() int64
 	size() int64
 
-	io() ioAt
+	refcountOffset() int64
+	refcountClusters() int
+	refcountBits() int
+
+	io() *ioAt
 }
 
 const (
@@ -284,6 +288,18 @@ func (*headerImpl) close() error {
 	return nil
 }
 
-func (h *headerImpl) io() ioAt {
-	return h.ioAt
+func (h *headerImpl) io() *ioAt {
+	return &h.ioAt
+}
+
+func (h *headerImpl) refcountOffset() int64 {
+	return int64(h.v2.RefcountTableOffset)
+}
+
+func (h *headerImpl) refcountClusters() int {
+	return int(h.v2.RefcountTableClusters)
+}
+
+func (h *headerImpl) refcountBits() int {
+	return 1 << h.v3.RefcountOrder
 }

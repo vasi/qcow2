@@ -1,7 +1,10 @@
 package qcow2
 
-import "io"
-import "log"
+import (
+	"fmt"
+	"io"
+	"log"
+)
 
 type Qcow2 interface {
 	io.Closer
@@ -26,13 +29,9 @@ func Open(rw ReaderWriterAt) (Qcow2, error) {
 }
 
 func (q *qcow2) Guest() Guest {
-	return &guestImpl{
-		q.header.io(),
-		q.header.size(),
-		q.header.clusterSize(),
-		q.header.l1Offset(),
-		q.header.l1Size(),
-	}
+	g := &guestImpl{}
+	g.Open(q.header, q.header.l1Offset(), q.header.size())
+	return g
 }
 
 func (q *qcow2) ClusterSize() int {
@@ -43,8 +42,22 @@ func (q *qcow2) Close() error {
 	return q.header.close()
 }
 
+func (q *qcow2) refcounts() refcounts {
+	r := &refcountsImpl{}
+	r.open(q.header)
+	return r
+}
+
 func (q *qcow2) XXX() {
-	if err := q.header.write(); err != nil {
-		log.Fatal(err)
+	r := q.refcounts()
+	var i int64
+	for i = 0; i < r.max(); i++ {
+		rc, err := r.refcount(i)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if rc == 0 {
+			fmt.Printf("%7d: %2d\n", i, rc)
+		}
 	}
 }
