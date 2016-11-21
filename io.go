@@ -18,6 +18,8 @@ type ioAt struct {
 	order binary.ByteOrder
 }
 
+const bufSize int = 32 * 1024
+
 func (i *ioAt) readAt(off int64, data interface{}) error {
 	section := io.NewSectionReader(i, off, math.MaxInt64-off)
 	return binary.Read(section, i.order, data)
@@ -47,11 +49,50 @@ func (i *ioAt) write64(off int64, v uint64) error {
 	return err
 }
 
+func (i *ioAt) makeBuf(max int) []byte {
+	if max > bufSize {
+		max := bufSize
+	}
+	return make([]byte, max)
+}
+func (i *ioAt) truncBuf(buf []byte, max int) []byte {
+	if max > len(buf) {
+		return buf[:max]
+	}
+	return buf
+}
+
 func (i *ioAt) fill(off int64, count int, c byte) error {
-	buf := make([]byte, count)
+	buf := i.makeBuf(count)
 	for i := 0; i < count; i++ {
 		buf[i] = c
 	}
-	_, err := i.WriteAt(buf, off)
-	return err
+
+	for count > 0 {
+		buf = i.truncBuf(buf, count)
+		if _, err := i.WriteAt(buf, off); err != nil {
+			return err
+		}
+		count -= len(buf)
+		off += int64(len(buf))
+	}
+
+	return nil
+}
+
+func (i *ioAt) copy(dst int64, src int64, count int) error {
+	buf := i.makeBuf(count)
+	for count > 0 {
+		buf = i.truncBuf(buf, count)
+		if _, err := i.ReadAt(buf, src); err != nil {
+			return err
+		}
+		if _, err := i.WriteAt(buf, dst); err != nil {
+			return err
+		}
+		count -= len(buf)
+		src += int64(len(buf))
+		dst += int64(len(buf))
+	}
+	return nil
 }

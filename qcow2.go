@@ -33,7 +33,7 @@ func Open(rw ReaderWriterAt) (Qcow2, error) {
 
 func (q *qcow2) Guest() Guest {
 	g := &guestImpl{}
-	g.Open(q.header, q.header.l1Offset(), q.header.size())
+	g.Open(q.header, q.refcounts(), q.header.l1Offset(), q.header.size())
 	return g
 }
 

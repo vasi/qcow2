@@ -1,5 +1,11 @@
-autoclear!
-warnings
+guest new block
+cow (+ test)
+resize refcount table
+qemu-img check
+metadata caching
+polish!
+snapshots (to test cow)
+locking
 
 
 base
