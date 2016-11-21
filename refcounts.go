@@ -3,11 +3,13 @@ package qcow2
 import (
 	"encoding/binary"
 	"errors"
+	"log"
 )
 
-// A block that was found, or an error
-type cluster struct {
+// A refcount block, or an error
+type refcount struct {
 	idx int64
+	rc  uint64
 	err error
 }
 
@@ -31,7 +33,7 @@ type refcounts interface {
 	allocate(n int64) (idx int64, err error)
 
 	// Iterate over used blocks
-	used() chan cluster
+	used() chan refcount
 }
 
 // Mask for valid bits of a refcount table entry
@@ -43,12 +45,12 @@ type refcountsImpl struct {
 	header header
 
 	// A channel that receives free clusters
-	freeClusters chan cluster
+	freeClusters chan refcount
 }
 
 func (r *refcountsImpl) open(header header) {
 	r.header = header
-	r.freeClusters = make(chan cluster)
+	r.freeClusters = make(chan refcount)
 	go r.findFreeClusters(r.freeClusters)
 }
 
@@ -70,6 +72,12 @@ func (r *refcountsImpl) clusterSize() int {
 // How many entries can go in one refcount block?
 func (r *refcountsImpl) blockEntries() int64 {
 	return int64(r.clusterSize() * 8 / int(r.bits()))
+}
+
+// The offset within refcount table for a block
+func (r *refcountsImpl) tableOffset(idx int64) int64 {
+	blockIdx := idx / r.blockEntries()
+	return 8 * blockIdx
 }
 
 func (r *refcountsImpl) max() int64 {
@@ -153,7 +161,7 @@ func (r *refcountsImpl) validateTableEntry(tableEntry uint64) (int64, error) {
 
 // Read a single table entry, given an offset (in bytes) within the table
 func (r *refcountsImpl) readTableEntry(tableOffset int64) (int64, error) {
-	tableEntry, err := r.io().read64(tableOffset)
+	tableEntry, err := r.io().read64(r.header.refcountOffset() + tableOffset)
 	if err != nil {
 		return 0, err
 	}
@@ -168,7 +176,7 @@ type rcOp func(rc uint64, missing bool) (newRc uint64, err error)
 
 // Perform an operation on a refcount
 func (r *refcountsImpl) doOp(idx int64, op rcOp) (rc uint64, err error) {
-	tableOffset := r.header.refcountOffset() + 8*idx/r.blockEntries()
+	tableOffset := r.tableOffset(idx)
 	if tableOffset > int64(r.clusterSize()*r.header.refcountClusters()) {
 		return op(0, true)
 	}
@@ -229,12 +237,12 @@ func (r *refcountsImpl) decrement(idx int64) (rc uint64, err error) {
 }
 
 // Look for free clusters, and write them to a channel
-func (r *refcountsImpl) findFreeClusters(ch chan cluster) {
+func (r *refcountsImpl) findFreeClusters(ch chan refcount) {
 	var i int64
 	for i = 0; true; i++ {
 		rc, err := r.refcount(i)
 		if err != nil || rc == 0 {
-			ch <- cluster{i, err}
+			ch <- refcount{i, 0, err}
 		}
 	}
 }
@@ -263,23 +271,23 @@ func (r *refcountsImpl) findFreeSequence(n int64) (idx int64, err error) {
 
 // Create the initial reference for a new cluster
 func (r *refcountsImpl) refNewCluster(idx int64) error {
-	block, err := r.allocRefcountBlock(idx)
+	blockOff, err := r.allocRefcountBlock(idx)
 	if err != nil {
 		return err
 	}
 	count := int(idx % r.blockEntries())
-	return r.write(block, count, 1)
+	return r.write(blockOff, count, 1)
 }
 
-// Allocate a single refcount block
-func (r *refcountsImpl) allocRefcountBlock(idx int64) (block int64, err error) {
-	tableOffset := r.header.refcountOffset() + 8*idx/r.blockEntries()
+// Allocate a single refcount block to reference cluster idx. Return the position of the block.
+func (r *refcountsImpl) allocRefcountBlock(idx int64) (blockOff int64, err error) {
+	tableOffset := r.tableOffset(idx)
 	if tableOffset > int64(r.clusterSize()*r.header.refcountClusters()) {
 		return 0, errors.New("TODO: Grow refcount table")
 	}
 
-	if block, err = r.readTableEntry(tableOffset); block != 0 || err != nil {
-		return
+	if blockOff, err = r.readTableEntry(tableOffset); blockOff != 0 || err != nil {
+		return blockOff, nil
 	}
 
 	// Didn't find a refcount block, must allocate one
@@ -289,8 +297,8 @@ func (r *refcountsImpl) allocRefcountBlock(idx int64) (block int64, err error) {
 	}
 
 	// Zero the new block
-	blockStart := blockIdx * int64(r.clusterSize())
-	if err = r.io().fill(blockStart, r.clusterSize(), 0); err != nil {
+	blockOff = blockIdx * int64(r.clusterSize())
+	if err = r.io().fill(blockOff, r.clusterSize(), 0); err != nil {
 		return
 	}
 
@@ -299,33 +307,39 @@ func (r *refcountsImpl) allocRefcountBlock(idx int64) (block int64, err error) {
 	if blockIdx > blockBlocksStart && blockIdx-blockBlocksStart < r.blockEntries() {
 		// The block is self-describing
 		count := int(blockIdx % r.blockEntries())
-		err = r.write(blockStart, count, 1)
+		err = r.write(blockOff, count, 1)
 	} else {
 		// Not self-describing, must recurse
 		err = r.refNewCluster(blockIdx)
 	}
-	return
+
+	// Write the new entry in the table
+	log.Printf("BLOCK: %d\n", blockIdx)
+	return blockOff, r.io().write64(tableOffset+r.header.refcountOffset(), uint64(blockOff))
 }
 
 func (r *refcountsImpl) allocate(n int64) (idx int64, err error) {
 	idx, err = r.findFreeSequence(n)
+	log.Printf("CLUSTERS: %d, %d\n", idx, n)
 	if err != nil {
 		return 0, err
 	}
 
 	for i := idx; i < idx+n; i++ {
-		r.refNewCluster(i)
+		if err = r.refNewCluster(i); err != nil {
+			return 0, err
+		}
 	}
 
 	return idx, err
 }
 
-func (r *refcountsImpl) used() chan cluster {
-	ch := make(chan cluster)
+func (r *refcountsImpl) used() chan refcount {
+	ch := make(chan refcount)
 	go func() {
 		table := make([]byte, r.clusterSize()*r.header.refcountClusters())
 		if _, err := r.io().ReadAt(table, r.header.refcountOffset()); err != nil {
-			ch <- cluster{0, err}
+			ch <- refcount{0, 0, err}
 			close(ch)
 			return
 		}
@@ -335,7 +349,7 @@ func (r *refcountsImpl) used() chan cluster {
 			rawEntry := binary.BigEndian.Uint64(table[8*ti:])
 			tableEntry, err := r.validateTableEntry(rawEntry)
 			if err != nil {
-				ch <- cluster{0, err}
+				ch <- refcount{0, 0, err}
 				continue
 			}
 			if tableEntry == 0 {
@@ -343,7 +357,7 @@ func (r *refcountsImpl) used() chan cluster {
 			}
 
 			if _, err = r.io().ReadAt(block, tableEntry); err != nil {
-				ch <- cluster{0, err}
+				ch <- refcount{0, 0, err}
 				continue
 			}
 
@@ -351,7 +365,7 @@ func (r *refcountsImpl) used() chan cluster {
 				bits := i * int(r.bits())
 				rc := r.readBuf(block[bits/8:], bits)
 				if rc != 0 {
-					ch <- cluster{int64(ti)*r.blockEntries() + int64(i), nil}
+					ch <- refcount{int64(ti)*r.blockEntries() + int64(i), rc, nil}
 				}
 			}
 		}
