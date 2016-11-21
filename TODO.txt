@@ -1,4 +1,6 @@
-write header on first write
+autoclear!
+warnings
+
 
 base
   use interfaces everywhere!

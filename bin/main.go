@@ -20,5 +20,5 @@ func main() {
 	}
 	defer q.Close()
 
-	q.XXX()
+	q.XXX(os.Args[2:]...)
 }

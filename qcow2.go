@@ -12,7 +12,7 @@ type Qcow2 interface {
 	Guest() Guest
 	ClusterSize() int
 
-	XXX()
+	XXX(args ...string)
 }
 
 type qcow2 struct {
@@ -48,16 +48,16 @@ func (q *qcow2) refcounts() refcounts {
 	return r
 }
 
-func (q *qcow2) XXX() {
+func (q *qcow2) XXX(args ...string) {
 	r := q.refcounts()
-	var i int64
-	for i = 0; i < r.max(); i++ {
-		rc, err := r.refcount(i)
+	for i := range r.used() {
+		if i.err != nil {
+			log.Fatal(i.err)
+		}
+		rc, err := r.refcount(i.idx)
 		if err != nil {
 			log.Fatal(err)
 		}
-		if rc == 0 {
-			fmt.Printf("%7d: %2d\n", i, rc)
-		}
+		fmt.Printf("%7d: %2d\n", i.idx, rc)
 	}
 }

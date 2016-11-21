@@ -38,3 +38,12 @@ func (i *ioAt) read64(off int64) (uint64, error) {
 	}
 	return i.order.Uint64(buf[:]), nil
 }
+
+func (i *ioAt) fill(off int64, count int, c byte) error {
+	buf := make([]byte, count)
+	for i := 0; i < count; i++ {
+		buf[i] = c
+	}
+	_, err := i.WriteAt(buf, off)
+	return err
+}
