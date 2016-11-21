@@ -6,6 +6,7 @@ import (
 	"io"
 )
 
+// Guest allows access to the blocks of a qcow2 file as a guest OS sees them
 type Guest interface {
 	Open(header header, l1 int64, size int64)
 
@@ -24,14 +25,12 @@ type guestImpl struct {
 	header     header
 	l1Position int64
 	size       int64
-	didWrite   bool
 }
 
 func (g *guestImpl) Open(header header, l1 int64, size int64) {
 	g.header = header
 	g.l1Position = l1
 	g.size = size
-	g.didWrite = false
 }
 
 func (g *guestImpl) Close() {
@@ -102,11 +101,8 @@ func (g *guestImpl) readCluster(p []byte, idx int64, off int) error {
 }
 
 func (g *guestImpl) writeCluster(p []byte, idx int64, off int) error {
-	if !g.didWrite {
-		if err := g.header.write(); err != nil {
-			return err
-		}
-		g.didWrite = true
+	if err := g.header.autoclear(); err != nil {
+		return err
 	}
 
 	clusterStart, err := g.lookupCluster(idx)
@@ -116,20 +112,19 @@ func (g *guestImpl) writeCluster(p []byte, idx int64, off int) error {
 
 	if clusterStart == 0 {
 		return errors.New("Allocating sectors not yet implemented")
-	} else {
-		// Do nothing if there are no changes.
-		pos := clusterStart + int64(off)
-		cmp := make([]byte, len(p))
-		if _, err := g.io().ReadAt(cmp, pos); err != nil {
-			return err
-		}
-		if bytes.Compare(p, cmp) == 0 {
-			return nil
-		}
+	}
+	// Do nothing if there are no changes.
+	pos := clusterStart + int64(off)
+	cmp := make([]byte, len(p))
+	if _, err := g.io().ReadAt(cmp, pos); err != nil {
+		return err
+	}
+	if bytes.Compare(p, cmp) == 0 {
+		return nil
+	}
 
-		if _, err := g.io().WriteAt(p, pos); err != nil {
-			return err
-		}
+	if _, err := g.io().WriteAt(p, pos); err != nil {
+		return err
 	}
 	return nil
 }

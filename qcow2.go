@@ -6,6 +6,7 @@ import (
 	"log"
 )
 
+// Qcow2 represents a qcow2 file
 type Qcow2 interface {
 	io.Closer
 
@@ -19,6 +20,7 @@ type qcow2 struct {
 	header header
 }
 
+// Open a qcow2 file
 func Open(rw ReaderWriterAt) (Qcow2, error) {
 	q := &qcow2{}
 	q.header = &headerImpl{}

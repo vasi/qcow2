@@ -13,6 +13,7 @@ type header interface {
 	close() error
 
 	write() error
+	autoclear() error
 
 	clusterSize() int
 
@@ -68,6 +69,8 @@ type headerImpl struct {
 	v3          headerV3
 	extraHeader []byte
 	extensions  map[uint32][]byte
+
+	didAutoclear bool
 }
 
 func (h *headerImpl) open(rw ReaderWriterAt) error {
@@ -179,13 +182,13 @@ func (h *headerImpl) read(r *io.SectionReader) error {
 }
 
 func (h *headerImpl) readExtensions(r *io.SectionReader) error {
-	var extensionId, extensionSize uint32
+	var extensionID, extensionSize uint32
 	h.extensions = make(map[uint32][]byte)
 	for {
-		if err := binary.Read(r, binary.BigEndian, &extensionId); err != nil {
+		if err := binary.Read(r, binary.BigEndian, &extensionID); err != nil {
 			return err
 		}
-		if extensionId == 0 {
+		if extensionID == 0 {
 			break
 		}
 
@@ -200,7 +203,7 @@ func (h *headerImpl) readExtensions(r *io.SectionReader) error {
 		if _, err := io.ReadFull(r, data); err != nil {
 			return err
 		}
-		h.extensions[extensionId] = data
+		h.extensions[extensionID] = data
 
 		// Align to 8 bytes
 		if extensionSize%8 != 0 {
@@ -232,11 +235,11 @@ func (h *headerImpl) write() error {
 			return err
 		}
 	}
-	for extensionId, data := range h.extensions {
-		if err := binary.Write(&buf, binary.BigEndian, extensionId); err != nil {
+	for extensionID, data := range h.extensions {
+		if err := binary.Write(&buf, binary.BigEndian, extensionID); err != nil {
 			return err
 		}
-		var extensionSize uint32 = uint32(len(data))
+		extensionSize := uint32(len(data))
 		if err := binary.Write(&buf, binary.BigEndian, extensionSize); err != nil {
 			return err
 		}
@@ -249,7 +252,7 @@ func (h *headerImpl) write() error {
 			}
 		}
 	}
-	var end uint32 = 0
+	var end uint32
 	if err := binary.Write(&buf, binary.BigEndian, end); err != nil {
 		return err
 	}
@@ -264,6 +267,17 @@ func (h *headerImpl) write() error {
 		return err
 	}
 
+	return nil
+}
+
+func (h *headerImpl) autoclear() error {
+	if h.didAutoclear {
+		return nil
+	}
+	if err := h.write(); err != nil {
+		return err
+	}
+	h.didAutoclear = true
 	return nil
 }
 

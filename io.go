@@ -7,6 +7,7 @@ import (
 	"math"
 )
 
+// ReaderWriterAt combines positioned reading and writing
 type ReaderWriterAt interface {
 	io.ReaderAt
 	io.WriterAt
