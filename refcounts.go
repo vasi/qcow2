@@ -320,7 +320,6 @@ func (r *refcountsImpl) allocRefcountBlock(idx int64) (blockOff int64, err error
 
 func (r *refcountsImpl) allocate(n int64) (idx int64, err error) {
 	idx, err = r.findFreeSequence(n)
-	log.Printf("CLUSTERS: %d, %d\n", idx, n)
 	if err != nil {
 		return 0, err
 	}

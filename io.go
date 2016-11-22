@@ -51,12 +51,12 @@ func (i *ioAt) write64(off int64, v uint64) error {
 
 func (i *ioAt) makeBuf(max int) []byte {
 	if max > bufSize {
-		max := bufSize
+		max = bufSize
 	}
 	return make([]byte, max)
 }
 func (i *ioAt) truncBuf(buf []byte, max int) []byte {
-	if max > len(buf) {
+	if max < len(buf) {
 		return buf[:max]
 	}
 	return buf
@@ -64,7 +64,7 @@ func (i *ioAt) truncBuf(buf []byte, max int) []byte {
 
 func (i *ioAt) fill(off int64, count int, c byte) error {
 	buf := i.makeBuf(count)
-	for i := 0; i < count; i++ {
+	for i := 0; i < len(buf); i++ {
 		buf[i] = c
 	}
 

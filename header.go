@@ -69,8 +69,6 @@ type headerImpl struct {
 	v3          headerV3
 	extraHeader []byte
 	extensions  map[uint32][]byte
-
-	didAutoclear bool
 }
 
 func (h *headerImpl) open(rw ReaderWriterAt) error {
@@ -271,13 +269,12 @@ func (h *headerImpl) write() error {
 }
 
 func (h *headerImpl) autoclear() error {
-	if h.didAutoclear {
+	if h.v3.AutoclearFeatures&^autoclearKnown == 0 {
 		return nil
 	}
 	if err := h.write(); err != nil {
 		return err
 	}
-	h.didAutoclear = true
 	return nil
 }
 

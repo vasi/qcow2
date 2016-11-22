@@ -95,27 +95,48 @@ func (g *guestImpl) validateL2(e mapEntry) error {
 	return g.validateL1(e)
 }
 
+// Validates an entry
 type entryValidator func(mapEntry) error
-type offsetFinder func(int64) (int64, error)
 
-func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool) (mapEntry, error) {
-	// Read the current entry
-	v, err := g.io().read64(off)
+// Re-calculates the offset in the file of the entry
+type offsetFinder func() (int64, error)
+
+func (g *guestImpl) currentEntry(finder offsetFinder, validator entryValidator) (e mapEntry, off int64, err error) {
+	off, err = finder()
 	if err != nil {
-		return 0, err
+		return
 	}
-	e := mapEntry(v)
+	if off == 0 {
+		// Zero offset -> zero entry
+		e = mapEntry(0)
+	} else {
+		var v uint64
+		v, err = g.io().read64(off)
+		if err != nil {
+			return
+		}
+		e = mapEntry(v)
+	}
 	if err = validator(e); err != nil {
-		return 0, err
+		return
 	}
-	if !writable || e.writable() {
-		return e, nil
+	return
+}
+
+func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool) (e mapEntry, err error) {
+	var v uint64
+	if v, err = g.io().read64(off); err != nil {
+		return
+	}
+	e = mapEntry(v)
+	if err = validator(e); err != nil || !writable || e.writable() {
+		return
 	}
 
 	// Need to make it writable, so allocate a new block
 	allocIdx, err := g.refcounts.allocate(1)
 	if err != nil {
-		return 0, err
+		return
 	}
 	alloc := allocIdx * int64(g.clusterSize())
 
@@ -124,6 +145,9 @@ func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool)
 		err = g.io().copy(alloc, e.offset(), g.clusterSize())
 	} else {
 		err = g.io().fill(alloc, g.clusterSize(), 0)
+	}
+	if err != nil {
+		return
 	}
 
 	// Write it to the parent
@@ -146,15 +170,12 @@ func (g *guestImpl) getL1(idx int64, writable bool) (mapEntry, error) {
 	return g.getEntry(g.validateL1, off, writable)
 }
 
-func (g *guestImpl) getL2(idx int64, writable bool) (mapEntry, error) {
-	// Get the L1
-	l1, err := g.getL1(idx, writable)
-	if err != nil || l1.nil() {
-		return 0, err
+func (g *guestImpl) getL2(idx int64, writable bool) (l1 mapEntry, err error) {
+	l1, err = g.getL1(idx, writable)
+	if !writable && l1.nil() {
+		return
 	}
-
-	// Read the current L2
-	off := l1.offset() + idx%g.l2Entries()*8
+	off := l1.offset() + (idx%g.l2Entries())*8
 	return g.getEntry(g.validateL2, off, writable)
 }
 
@@ -175,48 +196,49 @@ func (g *guestImpl) readByL2(p []byte, l2 mapEntry, off int) error {
 	return nil
 }
 
-func (g *guestImpl) readCluster(p []byte, idx int64, off int) error {
-	l2, err := g.getL2(idx, false)
+func (g *guestImpl) readCluster(p []byte, idx int64, off int) (err error) {
+	var l2 mapEntry
+	func() {
+		g.RLock()
+		defer g.RUnlock()
+		l2, err = g.getL2(idx, false)
+	}()
 	if err != nil {
 		return err
 	}
 	return g.readByL2(p, l2, off)
 }
 
-func (g *guestImpl) writeCluster(p []byte, idx int64, off int) error {
-	if err := g.header.autoclear(); err != nil {
-		return err
-	}
-
-	l2, err := g.lookupCluster(idx)
-	if err != nil {
-		return err
-	}
-
-	// Are there any changes?
+func (g *guestImpl) writeCluster(p []byte, idx int64, off int) (err error) {
+	// Check if there are any changes
 	orig := make([]byte, len(p))
-	if err = g.readClusterByL2(orig, l2, off); err != nil {
-		return err
+	if err = g.readCluster(orig, idx, off); err != nil {
+		return
 	}
 	if bytes.Compare(orig, p) == 0 {
-		// If no changes, no need to do anything!
+		// No changes, don't do anything
 		return nil
 	}
 
-	var pos int64
-	if l2 == 0 {
-		pos, err = g.allocate(idx)
-	} else {
-		pos, err = g.l2ToOffset(l2)
-	}
+	var l2 mapEntry
+	func() {
+		g.Lock()
+		defer g.Unlock()
+
+		// Must autoclear on first write
+		if err = g.header.autoclear(); err != nil {
+			return
+		}
+
+		// Get a writable L2 entry
+		l2, err = g.getL2(idx, true)
+	}()
 	if err != nil {
-		return err
+		return
 	}
 
-	if _, err := g.io().WriteAt(p, pos); err != nil {
-		return err
-	}
-	return nil
+	_, err = g.io().WriteAt(p, l2.offset()+int64(off))
+	return
 }
 
 type clusterFunc func(g *guestImpl, p []byte, idx int64, off int) error

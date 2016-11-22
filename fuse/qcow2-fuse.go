@@ -39,7 +39,7 @@ func (f file) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.Writ
 }
 
 func main() {
-	f, err := os.OpenFile(os.Args[1], os.O_RDWR, 0644)
+	f, err := os.OpenFile(os.Args[1], os.O_RDWR, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
