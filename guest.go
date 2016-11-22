@@ -139,6 +139,7 @@ func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool)
 		return
 	}
 	alloc := allocIdx * int64(g.clusterSize())
+	ret := mapEntry(uint64(alloc) | noCow)
 
 	// Initialize the new block
 	if e.hasOffset() {
@@ -151,7 +152,7 @@ func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool)
 	}
 
 	// Write it to the parent
-	if err = g.io().write64(off, uint64(alloc)); err != nil {
+	if err = g.io().write64(off, uint64(ret)); err != nil {
 		return 0, err
 	}
 
@@ -162,7 +163,7 @@ func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool)
 		}
 	}
 
-	return mapEntry(uint64(alloc) | noCow), nil
+	return ret, nil
 }
 
 func (g *guestImpl) getL1(idx int64, writable bool) (mapEntry, error) {
