@@ -7,14 +7,18 @@ import (
 	"sync"
 )
 
-// Guest allows access to the blocks of a qcow2 file as a guest OS sees them
+// Guest allows access to the data of a qcow2 file as a guest OS sees them
 type Guest interface {
+	// Setup a new guest
 	Open(header header, refcounts refcounts, l1 int64, size int64)
 
+	// Read and write at positions
 	ReaderWriterAt
+	// Get the size of this disk
 	Size() int64
 }
 
+// Bits for mapEntry
 const (
 	noCow      uint64 = 1 << 63
 	compressed uint64 = 1 << 62
@@ -23,36 +27,49 @@ const (
 	l2Valid    uint64 = l1Valid | compressed | zeroBit
 )
 
-type guestImpl struct {
-	header     header
-	refcounts  refcounts
-	l1Position int64
-	size       int64
-	sync.RWMutex
-}
-
+// An entry in the L1 or L2 blocks
 type mapEntry uint64
 
 func (e mapEntry) compressed() bool {
 	return uint64(e)&compressed != 0
 }
+
+// Is this entry a forced-zero block?
 func (e mapEntry) zero() bool { // For L2 only
 	return uint64(e)&zeroBit != 0
 }
+
+// Is this entry empty?
 func (e mapEntry) nil() bool {
 	return e.offset() == 0
 }
+
+// Does this entry contain a valid offset?
 func (e mapEntry) hasOffset() bool {
 	return !e.zero() && !e.nil()
 }
 func (e mapEntry) offset() int64 {
 	return int64(uint64(e) &^ (noCow | compressed))
 }
+
+// Does this cluster need to be copied before writing?
 func (e mapEntry) cow() bool {
-	return uint64(e)&noCow == 0 && uint64(e)&noCow != 0
+	return uint64(e)&noCow == 0 && !e.nil()
 }
+
+// Is it safe to alter the data pointed to by this item?
 func (e mapEntry) writable() bool {
 	return e.hasOffset() && !e.cow()
+}
+
+type guestImpl struct {
+	header     header
+	refcounts  refcounts
+	l1Position int64
+	size       int64
+
+	// Synchronize metadata changes only, block changes can stomp on each other
+	sync.RWMutex
 }
 
 func (g *guestImpl) Open(header header, refcounts refcounts, l1 int64, size int64) {
@@ -62,22 +79,22 @@ func (g *guestImpl) Open(header header, refcounts refcounts, l1 int64, size int6
 	g.size = size
 }
 
-func (g *guestImpl) Close() {
-
-}
-
+// Get the internal IO object
 func (g *guestImpl) io() *ioAt {
 	return g.header.io()
 }
 
+// Get the size of each cluster
 func (g *guestImpl) clusterSize() int {
 	return g.header.clusterSize()
 }
 
+// How many entries in an L2 table?
 func (g *guestImpl) l2Entries() int64 {
 	return int64(g.clusterSize() / 8)
 }
 
+// Validate an L1 entry
 func (g *guestImpl) validateL1(e mapEntry) error {
 	if e.offset()%int64(g.clusterSize()) != 0 {
 		return errors.New("Misaligned mapping entry")
@@ -85,6 +102,7 @@ func (g *guestImpl) validateL1(e mapEntry) error {
 	return nil
 }
 
+// Validate an L2 entry
 func (g *guestImpl) validateL2(e mapEntry) error {
 	if e.zero() {
 		return nil
@@ -98,31 +116,13 @@ func (g *guestImpl) validateL2(e mapEntry) error {
 // Validates an entry
 type entryValidator func(mapEntry) error
 
-// Re-calculates the offset in the file of the entry
-type offsetFinder func() (int64, error)
-
-func (g *guestImpl) currentEntry(finder offsetFinder, validator entryValidator) (e mapEntry, off int64, err error) {
-	off, err = finder()
-	if err != nil {
-		return
-	}
-	if off == 0 {
-		// Zero offset -> zero entry
-		e = mapEntry(0)
-	} else {
-		var v uint64
-		v, err = g.io().read64(off)
-		if err != nil {
-			return
-		}
-		e = mapEntry(v)
-	}
-	if err = validator(e); err != nil {
-		return
-	}
-	return
-}
-
+// Get an L1 or L2 entry.
+//
+// validator - a function to make sure the entry is valid
+// off		 - the offset into the file where the entry is found
+// writable  - whether or not the cluster the entry points to needs to be safe for
+//		       writing on return
+// t        - is this an L1 or L2 entry
 func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool) (e mapEntry, err error) {
 	var v uint64
 	if v, err = g.io().read64(off); err != nil {
@@ -138,12 +138,13 @@ func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool)
 	if err != nil {
 		return
 	}
+	old := e
 	alloc := allocIdx * int64(g.clusterSize())
-	ret := mapEntry(uint64(alloc) | noCow)
+	e = mapEntry(uint64(alloc) | noCow)
 
 	// Initialize the new block
-	if e.hasOffset() {
-		err = g.io().copy(alloc, e.offset(), g.clusterSize())
+	if old.hasOffset() {
+		err = g.io().copy(alloc, old.offset(), g.clusterSize())
 	} else {
 		err = g.io().fill(alloc, g.clusterSize(), 0)
 	}
@@ -152,25 +153,27 @@ func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool)
 	}
 
 	// Write it to the parent
-	if err = g.io().write64(off, uint64(ret)); err != nil {
-		return 0, err
+	if err = g.io().write64(off, uint64(e)); err != nil {
+		return
 	}
 
 	// Deref the old value
-	if e.hasOffset() {
-		if _, err = g.refcounts.decrement(e.offset() / int64(g.clusterSize())); err != nil {
-			return 0, err
+	if old.hasOffset() {
+		if _, err = g.refcounts.decrement(old.offset() / int64(g.clusterSize())); err != nil {
+			return
 		}
 	}
 
-	return ret, nil
+	return e, nil
 }
 
+// Get the L1 entry for the cluster at the given guest index
 func (g *guestImpl) getL1(idx int64, writable bool) (mapEntry, error) {
 	off := g.l1Position + (idx/g.l2Entries())*8
 	return g.getEntry(g.validateL1, off, writable)
 }
 
+// Get the L2 entry for the cluster at the given guest index
 func (g *guestImpl) getL2(idx int64, writable bool) (l1 mapEntry, err error) {
 	l1, err = g.getL1(idx, writable)
 	if !writable && l1.nil() {
@@ -180,12 +183,14 @@ func (g *guestImpl) getL2(idx int64, writable bool) (l1 mapEntry, err error) {
 	return g.getEntry(g.validateL2, off, writable)
 }
 
+// Fill a slice with zeros
 func zeroFill(p []byte) {
 	for i := 0; i < len(p); i++ {
 		p[i] = 0
 	}
 }
 
+// Read a segment of a cluster, given its L2 entry
 func (g *guestImpl) readByL2(p []byte, l2 mapEntry, off int) error {
 	if l2.nil() || l2.zero() {
 		zeroFill(p)
@@ -197,6 +202,10 @@ func (g *guestImpl) readByL2(p []byte, l2 mapEntry, off int) error {
 	return nil
 }
 
+// Read a segment of a cluster
+// p   - The buffer to read into
+// idx - The index of the cluster within the guest disk
+// off - The offset inside the cluster to start reading
 func (g *guestImpl) readCluster(p []byte, idx int64, off int) (err error) {
 	var l2 mapEntry
 	func() {
@@ -210,6 +219,7 @@ func (g *guestImpl) readCluster(p []byte, idx int64, off int) (err error) {
 	return g.readByL2(p, l2, off)
 }
 
+// Write a segment of a cluster
 func (g *guestImpl) writeCluster(p []byte, idx int64, off int) (err error) {
 	// Check if there are any changes
 	orig := make([]byte, len(p))
@@ -226,7 +236,7 @@ func (g *guestImpl) writeCluster(p []byte, idx int64, off int) (err error) {
 		g.Lock()
 		defer g.Unlock()
 
-		// Must autoclear on first write
+		// Must autoclear header before first write
 		if err = g.header.autoclear(); err != nil {
 			return
 		}
@@ -242,8 +252,10 @@ func (g *guestImpl) writeCluster(p []byte, idx int64, off int) (err error) {
 	return
 }
 
+// A function to process a cluster
 type clusterFunc func(g *guestImpl, p []byte, idx int64, off int) error
 
+// Given a slice that may span clusters, break it down into single-cluster operations
 func (g *guestImpl) perCluster(p []byte, off int64, f clusterFunc) (n int, err error) {
 	if off+int64(len(p)) > g.size {
 		return 0, io.ErrUnexpectedEOF

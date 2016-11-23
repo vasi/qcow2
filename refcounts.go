@@ -336,6 +336,8 @@ func (r *refcountsImpl) allocate(n int64) (idx int64, err error) {
 func (r *refcountsImpl) used() chan refcount {
 	ch := make(chan refcount)
 	go func() {
+		// Cache table and blocks, to quickly get new items
+		// Maybe take this out if we add a caching layer?
 		table := make([]byte, r.clusterSize()*r.header.refcountClusters())
 		if _, err := r.io().ReadAt(table, r.header.refcountOffset()); err != nil {
 			ch <- refcount{0, 0, err}

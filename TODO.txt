@@ -1,15 +1,13 @@
-guest new block
-cow (+ test)
+zero new blocks
+cow
+  test with snapshot
+  adjust refcount on L1 entries?
 resize refcount table
-qemu-img check
+  retry
 metadata caching
 polish!
-snapshots (to test cow)
-locking
-
 
 base
-  use interfaces everywhere!
   FUSE
   ext4
   discard
@@ -28,9 +26,10 @@ extra
     compression
     backing files
   hole punching
-  ignore zero writes
-  thread safety
-  fuse arguments (C api?)
+  fuse
+    arguments (C api?)
+    good filenames
+    daemonize
   libext2fs
   multi-mount protection
   tests
