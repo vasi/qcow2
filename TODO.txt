@@ -1,19 +1,13 @@
-zero new blocks
-cow
-  test with snapshot
-  adjust refcount on L1 entries?
 resize refcount table
   retry
 metadata caching
 polish!
 
-base
-  FUSE
-  ext4
-  discard
-  compact
+ext4
+discard
+compact
 extra
-  error handling
+  parallel?
   profiling
   qcow2
     feature names
@@ -25,12 +19,14 @@ extra
     creation
     compression
     backing files
-  hole punching
+    hole punching
   fuse
     arguments (C api?)
     good filenames
     daemonize
-  libext2fs
-  multi-mount protection
+  ext4
+    libext2fs
+    native?
+    multi-mount protection
   tests
   portability

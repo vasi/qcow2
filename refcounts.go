@@ -3,7 +3,6 @@ package qcow2
 import (
 	"encoding/binary"
 	"errors"
-	"log"
 )
 
 // A refcount block, or an error
@@ -283,7 +282,7 @@ func (r *refcountsImpl) refNewCluster(idx int64) error {
 func (r *refcountsImpl) allocRefcountBlock(idx int64) (blockOff int64, err error) {
 	tableOffset := r.tableOffset(idx)
 	if tableOffset > int64(r.clusterSize()*r.header.refcountClusters()) {
-		return 0, errors.New("TODO: Grow refcount table")
+		return 0, r.growTable()
 	}
 
 	if blockOff, err = r.readTableEntry(tableOffset); blockOff != 0 || err != nil {
@@ -314,7 +313,6 @@ func (r *refcountsImpl) allocRefcountBlock(idx int64) (blockOff int64, err error
 	}
 
 	// Write the new entry in the table
-	log.Printf("BLOCK: %d\n", blockIdx)
 	return blockOff, r.io().write64(tableOffset+r.header.refcountOffset(), uint64(blockOff))
 }
 
