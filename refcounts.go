@@ -49,8 +49,12 @@ type refcountsImpl struct {
 
 func (r *refcountsImpl) open(header header) {
 	r.header = header
+	r.resetFreeFinder(0)
+}
+
+func (r *refcountsImpl) resetFreeFinder(start int64) {
 	r.freeClusters = make(chan refcount)
-	go r.findFreeClusters(r.freeClusters)
+	go r.findFreeClusters(r.freeClusters, start)
 }
 
 // Get our ioAt
@@ -236,9 +240,9 @@ func (r *refcountsImpl) decrement(idx int64) (rc uint64, err error) {
 }
 
 // Look for free clusters, and write them to a channel
-func (r *refcountsImpl) findFreeClusters(ch chan refcount) {
+func (r *refcountsImpl) findFreeClusters(ch chan refcount, start int64) {
 	var i int64
-	for i = 0; true; i++ {
+	for i = start; true; i++ {
 		rc, err := r.refcount(i)
 		if err != nil || rc == 0 {
 			ch <- refcount{i, 0, err}
@@ -278,11 +282,88 @@ func (r *refcountsImpl) refNewCluster(idx int64) error {
 	return r.write(blockOff, count, 1)
 }
 
+// Grow the top-level refcount table.
+func (r *refcountsImpl) growTable() (err error) {
+	newTableStart, err := r.findFreeSequence(1)
+	if err != nil {
+		return
+	}
+
+	// Find an appropriate table size
+	var newBlocks int64
+	preTableClusters := newTableStart % r.blockEntries()
+	tableSize := int64(r.header.refcountClusters())
+	for {
+		// Try a new size
+		tableSize *= 2
+
+		// Solve: preTableClusters + tableSize + n <= n * r.blockEntries()
+		//     -> n >= (preTableClusters + tableSize) / (r.blockEntries() - 1)
+		newBlocks = (preTableClusters+tableSize-1)/(r.blockEntries()-1) + 1
+
+		// Make sure it fits in the new table
+		maxOffset := tableSize * int64(r.header.refcountClusters())
+		if r.tableOffset(newTableStart+tableSize+newBlocks) <= maxOffset {
+			break
+		}
+	}
+
+	// Create and fill the new table
+	next, err := r.findFreeSequence(tableSize - 1 + newBlocks)
+	if next != newTableStart+1 {
+		return errors.New("Couldn't allocate refcount table???")
+	}
+	if err != nil {
+		return err
+	}
+	cs := r.clusterSize()
+	err = r.io().copy(newTableStart*int64(cs), r.header.refcountOffset()*int64(cs),
+		r.header.refcountClusters()*cs)
+	if err != nil {
+		return
+	}
+	diff := int(tableSize) - r.header.refcountClusters()
+	err = r.io().fill(newTableStart+int64(r.header.refcountClusters())*int64(cs), diff*cs, 0)
+	if err != nil {
+		return
+	}
+
+	// Create the new blocks, and put them in the table
+	blockBase := newTableStart + tableSize
+	blockOff := r.tableOffset(newTableStart)
+	for b := 0; int64(b) < newBlocks; b++ {
+		blockPos := (blockBase + int64(b)) * int64(cs)
+		if err = r.io().fill(blockPos, cs, 0); err != nil {
+			return
+		}
+		if err = r.io().write64(newTableStart*blockOff, uint64(blockPos)); err != nil {
+			return
+		}
+		blockOff += 8
+	}
+
+	// Set refcounts in the new blocks
+	newClusterOffset := newTableStart % int64(cs)
+	for b := 0; int64(b) < tableSize+newBlocks; b++ {
+		newBlock := blockBase + newClusterOffset/r.blockEntries()
+		err = r.write(newBlock*int64(cs), int(newClusterOffset%r.blockEntries()), 1)
+		if err != nil {
+			return
+		}
+		newClusterOffset++
+	}
+
+	// Set the header values
+	return r.header.setRefcountTable(newTableStart*int64(cs), int(tableSize))
+}
+
 // Allocate a single refcount block to reference cluster idx. Return the position of the block.
 func (r *refcountsImpl) allocRefcountBlock(idx int64) (blockOff int64, err error) {
 	tableOffset := r.tableOffset(idx)
 	if tableOffset > int64(r.clusterSize()*r.header.refcountClusters()) {
-		return 0, r.growTable()
+		if err = r.growTable(); err != nil {
+			return
+		}
 	}
 
 	if blockOff, err = r.readTableEntry(tableOffset); blockOff != 0 || err != nil {

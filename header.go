@@ -24,6 +24,7 @@ type header interface {
 	refcountOffset() int64
 	refcountClusters() int
 	refcountBits() int
+	setRefcountTable(offset int64, size int) error
 
 	io() *ioAt
 }
@@ -313,4 +314,10 @@ func (h *headerImpl) refcountClusters() int {
 
 func (h *headerImpl) refcountBits() int {
 	return 1 << h.v3.RefcountOrder
+}
+
+func (h *headerImpl) setRefcountTable(offset int64, size int) error {
+	h.v2.RefcountTableOffset = uint64(offset)
+	h.v2.RefcountTableClusters = uint32(size)
+	return h.write()
 }
