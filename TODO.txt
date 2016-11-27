@@ -1,15 +1,20 @@
 resize refcount table
   retry
+why fragmentation?
+
 metadata caching
 polish!
+remove XXX
 
 ext4
 discard
 compact
 extra
+  test commands in-package?
   parallel?
   profiling
   qcow2
+    better dumper
     feature names
     features parsing
     writing
