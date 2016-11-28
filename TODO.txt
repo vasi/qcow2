@@ -7,8 +7,6 @@ qcow2
   profiling
   caching?
   better dumper
-  feature names
-  features parsing
   snapshots
   COW
   creation

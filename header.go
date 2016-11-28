@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 type header interface {
@@ -29,15 +30,24 @@ type header interface {
 	io() *ioAt
 }
 
+type featureType int
+
 const (
-	magic                uint32 = 0x514649fb
+	magic uint32 = 0x514649fb
+
+	featureNameExtensionID uint32      = 0x6803f857
+	incompatible           featureType = 0
+	compatible             featureType = 1
+	autoclear              featureType = 2
+
 	featureDirty         uint64 = 1
 	featureCorrupt       uint64 = 2
 	incompatibleKnown    uint64 = featureDirty | featureCorrupt
 	featureLazyRefcounts uint64 = 1
 	featureBitmaps       uint64 = 1
 	autoclearKnown       uint64 = featureBitmaps
-	v2Length             uint32 = 72
+
+	v2Length uint32 = 72
 )
 
 type headerV2 struct {
@@ -64,12 +74,19 @@ type headerV3 struct {
 	HeaderLength         uint32
 }
 
+type featureName struct {
+	ftype featureType
+	bit   int
+	name  string
+}
+
 type headerImpl struct {
-	ioAt        ioAt
-	v2          headerV2
-	v3          headerV3
-	extraHeader []byte
-	extensions  map[uint32][]byte
+	ioAt         ioAt
+	v2           headerV2
+	v3           headerV3
+	extraHeader  []byte
+	extensions   map[uint32][]byte
+	featureNames []featureName
 }
 
 func (h *headerImpl) open(rw ReaderWriterAt) error {
@@ -151,12 +168,13 @@ func (h *headerImpl) read(r *io.SectionReader) error {
 			return err
 		}
 
-		if unknown := h.v3.IncompatibleFeatures &^ incompatibleKnown; unknown != 0 {
-			return fmt.Errorf("Unknown incompatible features %0x", unknown)
-		}
 		if h.v3.IncompatibleFeatures&featureCorrupt != 0 {
 			return errors.New("Corrupt bit is set")
 		}
+		if h.v3.IncompatibleFeatures&featureDirty != 0 {
+			return errors.New("Dirty bit is set")
+		}
+
 		if h.v3.RefcountOrder == 0 || h.v3.RefcountOrder > 6 {
 			return fmt.Errorf("Bad refcount order %d", h.v3.RefcountOrder)
 		}
@@ -177,7 +195,15 @@ func (h *headerImpl) read(r *io.SectionReader) error {
 		}
 	}
 
-	return h.readExtensions(r)
+	if err := h.readExtensions(r); err != nil {
+		return err
+	}
+	h.parseFeatureNames()
+
+	if err := h.checkIncompatibleFeatures(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *headerImpl) readExtensions(r *io.SectionReader) error {
@@ -215,11 +241,49 @@ func (h *headerImpl) readExtensions(r *io.SectionReader) error {
 	return nil
 }
 
-func (h *headerImpl) write() error {
-	if h.v3.IncompatibleFeatures&featureDirty != 0 {
-		return errors.New("Don't know how to write with dirty refcounts")
+func (h *headerImpl) parseFeatureNames() {
+	h.featureNames = make([]featureName, 0)
+	data, found := h.extensions[featureNameExtensionID]
+	if !found {
+		return
 	}
 
+	for i := 0; i < len(data); i += 48 {
+		name := data[i+2 : i+48]
+		bytes.TrimRight(data, "\x00")
+		h.featureNames = append(h.featureNames, featureName{
+			featureType(data[i]),
+			int(data[i+1]),
+			string(name),
+		})
+	}
+}
+
+func (h *headerImpl) checkIncompatibleFeatures() error {
+	unknown := h.v3.IncompatibleFeatures &^ incompatibleKnown
+	if unknown == 0 {
+		return nil
+	}
+
+	names := make([]string, 0)
+	for i := 0; i < 64 && unknown != 0; i++ {
+		if unknown&1 != 0 {
+			name := fmt.Sprintf("bit %d", i)
+			for _, fn := range h.featureNames {
+				if fn.ftype == incompatible && fn.bit == i {
+					name = fn.name
+					break
+				}
+			}
+			names = append(names, name)
+		}
+		unknown >>= 1
+	}
+
+	return errors.New("Incompatible features: " + strings.Join(names, ", "))
+}
+
+func (h *headerImpl) write() error {
 	h.v3.AutoclearFeatures &= autoclearKnown
 
 	var buf bytes.Buffer
