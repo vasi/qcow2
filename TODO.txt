@@ -1,6 +1,3 @@
-metadata caching
-  set table offset
-  preread blocks
 polish!
   used
   doOp
@@ -15,6 +12,7 @@ extra
   parallel?
   profiling
   qcow2
+    caching?
     better dumper
     feature names
     features parsing

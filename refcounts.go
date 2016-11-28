@@ -49,12 +49,8 @@ type refcountsImpl struct {
 
 func (r *refcountsImpl) open(header header) {
 	r.header = header
-	r.resetFreeFinder(0)
-}
-
-func (r *refcountsImpl) resetFreeFinder(start int64) {
 	r.freeClusters = make(chan refcount)
-	go r.findFreeClusters(r.freeClusters, start)
+	go r.findFreeClusters(r.freeClusters)
 }
 
 // Get our ioAt
@@ -178,7 +174,7 @@ func (r *refcountsImpl) readTableEntry(tableOffset int64) (int64, error) {
 type rcOp func(rc uint64, missing bool) (newRc uint64, err error)
 
 // Perform an operation on a refcount
-func (r *refcountsImpl) doOp(idx int64, op rcOp) (rc uint64, err error) {
+func (r *refcountsImpl) refcountOp(idx int64, op rcOp) (rc uint64, err error) {
 	tableOffset := r.tableOffset(idx)
 	if tableOffset > int64(r.clusterSize()*r.header.refcountClusters()) {
 		return op(0, true)
@@ -210,7 +206,7 @@ func (r *refcountsImpl) doOp(idx int64, op rcOp) (rc uint64, err error) {
 }
 
 func (r *refcountsImpl) refcount(idx int64) (rc uint64, err error) {
-	return r.doOp(idx, func(rc uint64, missing bool) (newRc uint64, err error) {
+	return r.refcountOp(idx, func(rc uint64, missing bool) (newRc uint64, err error) {
 		if missing {
 			return 0, nil
 		}
@@ -219,7 +215,7 @@ func (r *refcountsImpl) refcount(idx int64) (rc uint64, err error) {
 }
 
 func (r *refcountsImpl) increment(idx int64) (rc uint64, err error) {
-	return r.doOp(idx, func(rc uint64, missing bool) (newRc uint64, err error) {
+	return r.refcountOp(idx, func(rc uint64, missing bool) (newRc uint64, err error) {
 		if missing || rc == 0 {
 			return 0, errors.New("Modifying unallocated refcount")
 		}
@@ -231,7 +227,7 @@ func (r *refcountsImpl) increment(idx int64) (rc uint64, err error) {
 }
 
 func (r *refcountsImpl) decrement(idx int64) (rc uint64, err error) {
-	return r.doOp(idx, func(rc uint64, missing bool) (newRc uint64, err error) {
+	return r.refcountOp(idx, func(rc uint64, missing bool) (newRc uint64, err error) {
 		if missing || rc == 0 {
 			return 0, errors.New("Modifying unallocated refcount")
 		}
@@ -240,9 +236,17 @@ func (r *refcountsImpl) decrement(idx int64) (rc uint64, err error) {
 }
 
 // Look for free clusters, and write them to a channel
-func (r *refcountsImpl) findFreeClusters(ch chan refcount, start int64) {
+func (r *refcountsImpl) findFreeClusters(ch chan refcount) {
+	// Quickly find a place to start
+	var rc refcount
+	for rc = range r.fastScan(false) {
+		if rc.err != nil || rc.rc == 0 {
+			break
+		}
+	}
+
 	var i int64
-	for i = start; true; i++ {
+	for i = rc.idx; true; i++ {
 		rc, err := r.refcount(i)
 		if err != nil || rc == 0 {
 			ch <- refcount{i, 0, err}
@@ -426,15 +430,16 @@ func (r *refcountsImpl) allocate(n int64) (idx int64, err error) {
 	return idx, err
 }
 
-func (r *refcountsImpl) used() chan refcount {
+func (r *refcountsImpl) fastScan(onlyUsed bool) chan refcount {
 	ch := make(chan refcount)
 	go func() {
+		defer close(ch)
+
 		// Cache table and blocks, to quickly get new items
 		// Maybe take this out if we add a caching layer?
 		table := make([]byte, r.clusterSize()*r.header.refcountClusters())
 		if _, err := r.io().ReadAt(table, r.header.refcountOffset()); err != nil {
 			ch <- refcount{0, 0, err}
-			close(ch)
 			return
 		}
 
@@ -444,26 +449,48 @@ func (r *refcountsImpl) used() chan refcount {
 			tableEntry, err := r.validateTableEntry(rawEntry)
 			if err != nil {
 				ch <- refcount{0, 0, err}
-				continue
-			}
-			if tableEntry == 0 {
-				continue
+				return
 			}
 
-			if _, err = r.io().ReadAt(block, tableEntry); err != nil {
-				ch <- refcount{0, 0, err}
+			if tableEntry == 0 && onlyUsed {
 				continue
 			}
-
-			for i := 0; i < int(r.blockEntries()); i++ {
-				bits := i * int(r.bits())
-				rc := r.readBuf(block[bits/8:], bits)
-				if rc != 0 {
-					ch <- refcount{int64(ti)*r.blockEntries() + int64(i), rc, nil}
+			if tableEntry != 0 {
+				if _, err = r.io().ReadAt(block, tableEntry); err != nil {
+					ch <- refcount{0, 0, err}
+					return
 				}
+			}
+
+			var rc uint64
+			for i := 0; i < int(r.blockEntries()); i++ {
+				cl := int64(ti)*r.blockEntries() + int64(i)
+				if tableEntry == 0 {
+					rc = 0
+				} else {
+					bits := i * int(r.bits())
+					rc = r.readBuf(block[bits/8:], bits)
+				}
+				ch <- refcount{cl, rc, nil}
 			}
 		}
 		close(ch)
+	}()
+	return ch
+}
+
+func (r *refcountsImpl) used() chan refcount {
+	ch := make(chan refcount)
+	go func() {
+		defer close(ch)
+		for rc := range r.fastScan(true) {
+			if rc.err != nil || rc.rc > 0 {
+				ch <- rc
+			}
+			if rc.err != nil {
+				return
+			}
+		}
 	}()
 	return ch
 }
