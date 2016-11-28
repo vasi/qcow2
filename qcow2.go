@@ -1,11 +1,6 @@
 package qcow2
 
-import (
-	"fmt"
-	"io"
-	"log"
-	"strconv"
-)
+import "io"
 
 // Qcow2 represents a qcow2 file
 type Qcow2 interface {
@@ -49,34 +44,4 @@ func (q *qcow2) refcounts() refcounts {
 	r := &refcountsImpl{}
 	r.open(q.header)
 	return r
-}
-
-func (q *qcow2) XXX(args ...string) {
-	op, args := args[0], args[1:]
-
-	r := q.refcounts()
-	switch op {
-	case "refcounts":
-		for i := range r.used() {
-			if i.err != nil {
-				log.Fatal(i.err)
-			}
-			fmt.Printf("%7d: %2d\n", i.idx, i.rc)
-		}
-	case "alloc":
-		count := 1
-		var err error
-		if len(args) >= 1 {
-			if count, err = strconv.Atoi(args[0]); err != nil {
-				log.Fatal(err)
-			}
-		}
-		cluster, err := r.allocate(int64(count))
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%7d\n", cluster)
-	default:
-		log.Fatal("Bad operation")
-	}
 }

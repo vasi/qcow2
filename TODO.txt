@@ -1,23 +1,14 @@
-polish!
-  used
-  doOp
-  ...
-remove XXX
-
 ext4
 discard
 compact
 extra
-  test commands in-package?
-  parallel?
-  profiling
   qcow2
+    test commands in-package?
+    profiling
     caching?
     better dumper
     feature names
     features parsing
-    writing
-      safe refcount growth
     snapshots
     COW
     creation
