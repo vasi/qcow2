@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -39,7 +41,14 @@ func (f file) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.Writ
 }
 
 func main() {
-	f, err := os.OpenFile(os.Args[1], os.O_RDWR, 0)
+	filename := os.Args[1]
+
+	dstname := filepath.Base(filename)
+	if filepath.Ext(dstname) == ".qcow2" {
+		dstname = strings.TrimSuffix(dstname, filepath.Ext(dstname))
+	}
+
+	f, err := os.OpenFile(filename, os.O_RDWR, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,7 +76,7 @@ func main() {
 	defer conn.Close()
 
 	tree := &fs.Tree{}
-	tree.Add("device", file{guest})
+	tree.Add(dstname, file{guest})
 	err = fs.Serve(conn, tree)
 	if err != nil {
 		log.Fatal(err)

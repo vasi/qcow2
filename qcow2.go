@@ -8,8 +8,6 @@ type Qcow2 interface {
 
 	Guest() Guest
 	ClusterSize() int
-
-	XXX(args ...string)
 }
 
 type qcow2 struct {
