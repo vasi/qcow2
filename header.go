@@ -17,7 +17,7 @@ type header interface {
 
 	clusterSize() int
 
-	l1Size() int
+	l1Entries() int
 	l1Offset() int64
 	size() int64
 
@@ -287,7 +287,7 @@ func (h *headerImpl) size() int64 {
 	return int64(h.v2.Size)
 }
 
-func (h *headerImpl) l1Size() int {
+func (h *headerImpl) l1Entries() int {
 	return int(h.v2.L1Size)
 }
 

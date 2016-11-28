@@ -10,7 +10,7 @@ import (
 // Guest allows access to the data of a qcow2 file as a guest OS sees them
 type Guest interface {
 	// Setup a new guest
-	Open(header header, refcounts refcounts, l1 int64, size int64)
+	open(header header, refcounts refcounts, l1 int64, size int64)
 
 	// Read and write at positions
 	ReaderWriterAt
@@ -72,7 +72,7 @@ type guestImpl struct {
 	sync.RWMutex
 }
 
-func (g *guestImpl) Open(header header, refcounts refcounts, l1 int64, size int64) {
+func (g *guestImpl) open(header header, refcounts refcounts, l1 int64, size int64) {
 	g.header = header
 	g.refcounts = refcounts
 	g.l1Position = l1
@@ -87,6 +87,13 @@ func (g *guestImpl) io() *ioAt {
 // Get the size of each cluster
 func (g *guestImpl) clusterSize() int {
 	return g.header.clusterSize()
+}
+
+// How big can the L1 be, in clusters?
+func (g *guestImpl) l1Clusters() int {
+	clusters := divceil(g.size, int64(g.clusterSize()))
+	l1Entries := divceil(clusters, g.l2Entries())
+	return int(divceil(l1Entries*8, int64(g.clusterSize())))
 }
 
 // How many entries in an L2 table?
@@ -122,7 +129,6 @@ type entryValidator func(mapEntry) error
 // off		 - the offset into the file where the entry is found
 // writable  - whether or not the cluster the entry points to needs to be safe for
 //		       writing on return
-// t        - is this an L1 or L2 entry
 func (g *guestImpl) getEntry(validator entryValidator, off int64, writable bool) (e mapEntry, err error) {
 	var v uint64
 	if v, err = g.io().read64(off); err != nil {
@@ -176,7 +182,7 @@ func (g *guestImpl) getL1(idx int64, writable bool) (mapEntry, error) {
 // Get the L2 entry for the cluster at the given guest index
 func (g *guestImpl) getL2(idx int64, writable bool) (l1 mapEntry, err error) {
 	l1, err = g.getL1(idx, writable)
-	if !writable && l1.nil() {
+	if err != nil || (!writable && l1.nil()) {
 		return
 	}
 	off := l1.offset() + (idx%g.l2Entries())*8

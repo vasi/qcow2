@@ -1,9 +1,10 @@
-resize refcount table
-  retry
-why fragmentation?
-
 metadata caching
+  set table offset
+  preread blocks
 polish!
+  used
+  doOp
+  ...
 remove XXX
 
 ext4
