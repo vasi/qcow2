@@ -16,6 +16,7 @@ type header interface {
 	write() error
 	autoclear() error
 
+	version() int
 	clusterSize() int
 
 	l1Entries() int
@@ -26,6 +27,9 @@ type header interface {
 	refcountClusters() int
 	refcountBits() int
 	setRefcountTable(offset int64, size int) error
+
+	snapshotsOffset() int64
+	snapshotsCount() int
 
 	io() *ioAt
 }
@@ -232,7 +236,7 @@ func (h *headerImpl) readExtensions(r *io.SectionReader) error {
 
 		// Align to 8 bytes
 		if extensionSize%8 != 0 {
-			if _, err := r.Seek(int64(8-extensionSize&8), io.SeekCurrent); err != nil {
+			if _, err := r.Seek(int64(8-extensionSize%8), io.SeekCurrent); err != nil {
 				return err
 			}
 		}
@@ -384,4 +388,16 @@ func (h *headerImpl) setRefcountTable(offset int64, size int) error {
 	h.v2.RefcountTableOffset = uint64(offset)
 	h.v2.RefcountTableClusters = uint32(size)
 	return h.write()
+}
+
+func (h *headerImpl) snapshotsOffset() int64 {
+	return int64(h.v2.SnapshotsOffset)
+}
+
+func (h *headerImpl) snapshotsCount() int {
+	return int(h.v2.NbSnapshots)
+}
+
+func (h *headerImpl) version() int {
+	return int(h.v2.Version)
 }

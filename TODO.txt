@@ -1,3 +1,8 @@
+exceptions?
+snapshots
+  guests
+  no-write
+  vmstate
 ext4
 discard
 compact
@@ -8,11 +13,13 @@ qcow2
   caching?
   better dumper
   snapshots
-  COW
   creation
+  more operations: take snapshot, delete snapshot, resize, convert
   compression
+  encryption
   backing files
   hole punching
+  test sub-byte refcounts
 fuse
   arguments (C api?)
   daemonize

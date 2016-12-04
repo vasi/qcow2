@@ -6,8 +6,12 @@ import "io"
 type Qcow2 interface {
 	io.Closer
 
+	Version() int
+
 	Guest() Guest
 	ClusterSize() int
+
+	Snapshots() ([]Snapshot, error)
 }
 
 type qcow2 struct {
@@ -38,8 +42,16 @@ func (q *qcow2) Close() error {
 	return q.header.close()
 }
 
+func (q *qcow2) Snapshots() ([]Snapshot, error) {
+	return readSnapshots(q.header)
+}
+
 func (q *qcow2) refcounts() refcounts {
 	r := &refcountsImpl{}
 	r.open(q.header)
 	return r
+}
+
+func (q *qcow2) Version() int {
+	return q.header.version()
 }
