@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/timtadh/data-structures/exc"
-	"github.com/vasi/go-qcow2/eio"
+	"github.com/vasi/qcow2/eio"
 )
 
 // A Snapshot represents a snapshot of a qcow2 state

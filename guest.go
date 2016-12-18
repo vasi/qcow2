@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/timtadh/data-structures/exc"
-	"github.com/vasi/go-qcow2/eio"
+	"github.com/vasi/qcow2/eio"
 )
 
 // Guest allows access to the data of a qcow2 file as a guest OS sees them
