@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/timtadh/data-structures/exc"
-	"github.com/vasi/go-qcow2/bio"
+	"github.com/vasi/go-qcow2/eio"
 )
 
 type header interface {

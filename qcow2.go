@@ -3,7 +3,7 @@ package qcow2
 import (
 	"io"
 
-	"github.com/vasi/go-qcow2/bio"
+	"github.com/vasi/go-qcow2/eio"
 )
 
 // Qcow2 represents a qcow2 file

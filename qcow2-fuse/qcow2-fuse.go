@@ -9,7 +9,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"github.com/vasi/go-qcow2"
-	"github.com/vasi/go-qcow2/bio"
+	"github.com/vasi/go-qcow2/eio"
 	"golang.org/x/net/context"
 )
 
