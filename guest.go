@@ -16,7 +16,7 @@ type Guest interface {
 	Close() error
 
 	// Read and write at positions
-	bio.ReaderWriterAt
+	eio.ReaderWriterAt
 	// Get the size of this disk
 	Size() int64
 }
@@ -83,13 +83,13 @@ func (g *guestImpl) open(header header, refcounts refcounts, l1 int64, size int6
 }
 
 func (g *guestImpl) Close() error {
-	return bio.BacktraceWrap(func() {
+	return eio.BacktraceWrap(func() {
 		g.header.close()
 		g.refcounts.close()
 	})
 }
 
-func (g *guestImpl) io() *bio.BinaryIO {
+func (g *guestImpl) io() *eio.BinaryIO {
 	return g.header.io()
 }
 
@@ -265,14 +265,14 @@ func (g *guestImpl) perCluster(p []byte, off int64, f clusterFunc) int {
 }
 
 func (g *guestImpl) ReadAt(p []byte, off int64) (n int, err error) {
-	err = bio.BacktraceWrap(func() {
+	err = eio.BacktraceWrap(func() {
 		n = g.perCluster(p, off, (*guestImpl).readCluster)
 	})
 	return
 }
 
 func (g *guestImpl) WriteAt(p []byte, off int64) (n int, err error) {
-	err = bio.BacktraceWrap(func() {
+	err = eio.BacktraceWrap(func() {
 		n = g.perCluster(p, off, (*guestImpl).writeCluster)
 	})
 	return

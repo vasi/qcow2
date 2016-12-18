@@ -32,7 +32,7 @@ type refcounts interface {
 	allocate(n int64) int64
 
 	// Iterate over used blocks
-	used(*bio.Pipeline) <-chan refcount
+	used(*eio.Pipeline) <-chan refcount
 }
 
 // Mask for valid bits of a refcount table entry
@@ -44,7 +44,7 @@ type refcountsImpl struct {
 	header header
 
 	// A pipeline for free clusters
-	freeClustersPipeline *bio.Pipeline
+	freeClustersPipeline *eio.Pipeline
 	// A channel that receives free clusters
 	freeClusters <-chan int64
 }
@@ -53,7 +53,7 @@ func (r *refcountsImpl) open(header header) {
 	r.header = header
 
 	// Setup free cluster finding
-	r.freeClustersPipeline = bio.NewPipeline()
+	r.freeClustersPipeline = eio.NewPipeline()
 	r.freeClusters = r.findFreeClusters(r.freeClustersPipeline)
 }
 
@@ -62,7 +62,7 @@ func (r *refcountsImpl) close() {
 }
 
 // Get our IO
-func (r *refcountsImpl) io() *bio.BinaryIO {
+func (r *refcountsImpl) io() *eio.BinaryIO {
 	return r.header.io()
 }
 
@@ -228,7 +228,7 @@ func (r *refcountsImpl) decrement(idx int64) uint64 {
 }
 
 // Look for free clusters, and write them to a channel
-func (r *refcountsImpl) findFreeClusters(pipe *bio.Pipeline) <-chan int64 {
+func (r *refcountsImpl) findFreeClusters(pipe *eio.Pipeline) <-chan int64 {
 	ch := make(chan int64)
 	pipe.Go(func() {
 		defer close(ch)
@@ -387,7 +387,7 @@ func (r *refcountsImpl) allocate(n int64) int64 {
 	return idx
 }
 
-func (r *refcountsImpl) fastScan(pipe *bio.Pipeline, onlyUsed bool) <-chan refcount {
+func (r *refcountsImpl) fastScan(pipe *eio.Pipeline, onlyUsed bool) <-chan refcount {
 	ch := make(chan refcount)
 	pipe.Go(func() {
 		defer close(ch)
@@ -428,6 +428,6 @@ func (r *refcountsImpl) fastScan(pipe *bio.Pipeline, onlyUsed bool) <-chan refco
 	return ch
 }
 
-func (r *refcountsImpl) used(pipe *bio.Pipeline) <-chan refcount {
+func (r *refcountsImpl) used(pipe *eio.Pipeline) <-chan refcount {
 	return r.fastScan(pipe, true)
 }

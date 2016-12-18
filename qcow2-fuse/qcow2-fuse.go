@@ -57,7 +57,7 @@ func main() {
 
 	q, err := qcow2.Open(f)
 	if err != nil {
-		bio.Trace(err)
+		eio.Trace(err)
 		log.Fatal(err)
 	}
 	defer q.Close()

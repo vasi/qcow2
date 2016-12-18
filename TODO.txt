@@ -9,6 +9,7 @@ ext4
 discard
 compact
 
+
 qcow2
   test commands in-package?
   profiling
@@ -29,5 +30,6 @@ ext4
   libext2fs
   native?
   multi-mount protection
+docs
 tests
 portability?

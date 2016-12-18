@@ -23,9 +23,9 @@ type qcow2 struct {
 }
 
 // Open a qcow2 file
-func Open(rw bio.ReaderWriterAt) (q Qcow2, err error) {
+func Open(rw eio.ReaderWriterAt) (q Qcow2, err error) {
 	var qi *qcow2
-	err = bio.BacktraceWrap(func() {
+	err = eio.BacktraceWrap(func() {
 		qi = &qcow2{}
 		qi.header = &headerImpl{}
 		qi.header.open(rw)
@@ -34,7 +34,7 @@ func Open(rw bio.ReaderWriterAt) (q Qcow2, err error) {
 }
 
 func (q *qcow2) Guest() (g Guest, err error) {
-	err = bio.BacktraceWrap(func() {
+	err = eio.BacktraceWrap(func() {
 		g = &guestImpl{}
 		g.open(q.header, q.refcounts(), q.header.l1Offset(), q.header.size())
 	})
@@ -50,7 +50,7 @@ func (q *qcow2) Close() error {
 }
 
 func (q *qcow2) Snapshots() (snaps []Snapshot, err error) {
-	err = bio.BacktraceWrap(func() {
+	err = eio.BacktraceWrap(func() {
 		snaps = readSnapshots(q.header)
 	})
 	return

@@ -1,4 +1,4 @@
-package bio
+package eio
 
 // Binary data reading and writing, using exceptions
 

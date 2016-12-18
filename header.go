@@ -11,7 +11,7 @@ import (
 )
 
 type header interface {
-	open(bio.ReaderWriterAt)
+	open(eio.ReaderWriterAt)
 	close()
 
 	write()
@@ -32,7 +32,7 @@ type header interface {
 	snapshotsOffset() int64
 	snapshotsCount() int
 
-	io() *bio.BinaryIO
+	io() *eio.BinaryIO
 }
 
 type featureType int
@@ -86,7 +86,7 @@ type featureName struct {
 }
 
 type headerImpl struct {
-	bio          *bio.BinaryIO
+	bio          *eio.BinaryIO
 	v2           headerV2
 	v3           headerV3
 	extraHeader  []byte
@@ -94,8 +94,8 @@ type headerImpl struct {
 	featureNames []featureName
 }
 
-func (h *headerImpl) open(rw bio.ReaderWriterAt) {
-	h.bio = bio.NewIO(rw, binary.BigEndian)
+func (h *headerImpl) open(rw eio.ReaderWriterAt) {
+	h.bio = eio.NewIO(rw, binary.BigEndian)
 
 	// Validate some basic fields.
 	h.bio.ReadData(0, &h.v2.Magic)
@@ -112,7 +112,7 @@ func (h *headerImpl) open(rw bio.ReaderWriterAt) {
 	}
 
 	// Make sure we don't read too far.
-	section := bio.NewReaderSection(h.bio, 0, 1<<h.v2.ClusterBits)
+	section := eio.NewReaderSection(h.bio, 0, 1<<h.v2.ClusterBits)
 	h.read(section)
 }
 
@@ -120,7 +120,7 @@ func (h *headerImpl) close() {
 	// Nothing to do
 }
 
-func (h *headerImpl) read(r *bio.SequentialReader) {
+func (h *headerImpl) read(r *eio.SequentialReader) {
 	// Read v2 header
 	r.ReadData(&h.v2)
 
@@ -192,7 +192,7 @@ func (h *headerImpl) read(r *bio.SequentialReader) {
 	h.checkIncompatibleFeatures()
 }
 
-func (h *headerImpl) readExtensions(r *bio.SequentialReader) {
+func (h *headerImpl) readExtensions(r *eio.SequentialReader) {
 	h.extensions = make(map[uint32][]byte)
 	for {
 		extensionID := r.ReadUint32()
@@ -258,7 +258,7 @@ func (h *headerImpl) checkIncompatibleFeatures() {
 func (h *headerImpl) write() {
 	h.v3.AutoclearFeatures &= autoclearKnown
 
-	w := bio.NewBinaryWriter(h.bio, 0)
+	w := eio.NewBinaryWriter(h.bio, 0)
 	w.WriteData(h.v2)
 	w.WriteData(h.v3)
 	if h.extraHeader != nil {
@@ -304,7 +304,7 @@ func (h *headerImpl) l1Offset() int64 {
 	return int64(h.v2.L1TableOffset)
 }
 
-func (h *headerImpl) io() *bio.BinaryIO {
+func (h *headerImpl) io() *eio.BinaryIO {
 	return h.bio
 }
 

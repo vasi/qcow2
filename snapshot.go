@@ -91,14 +91,14 @@ func readSnapshots(h header) []Snapshot {
 	}
 
 	off := h.snapshotsOffset()
-	r := bio.NewReaderSection(h.io(), off, math.MaxInt64-off)
+	r := eio.NewReaderSection(h.io(), off, math.MaxInt64-off)
 	for i := 0; i < int(h.snapshotsCount()); i++ {
 		snaps = append(snaps, readSnapshot(h, r))
 	}
 	return snaps
 }
 
-func readSnapshot(h header, r *bio.SequentialReader) *snapshotImpl {
+func readSnapshot(h header, r *eio.SequentialReader) *snapshotImpl {
 	var sh snapshotHeader
 	r.ReadData(&sh)
 	if h.version() >= 3 && sh.ExtraSize < 16 {
@@ -122,7 +122,7 @@ func readSnapshot(h header, r *bio.SequentialReader) *snapshotImpl {
 	return snap
 }
 
-func (s *snapshotImpl) readExtra(r *bio.SequentialReader) {
+func (s *snapshotImpl) readExtra(r *eio.SequentialReader) {
 	exc.Try(func() {
 		s.vmStateSize = int64(r.ReadUint64())
 		s.guestSize = int64(r.ReadUint64())
