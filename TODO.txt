@@ -1,4 +1,6 @@
-exceptions?
+expose used() via internal package?
+dump?
+
 snapshots
   guests
   no-write

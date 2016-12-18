@@ -9,6 +9,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"github.com/vasi/go-qcow2"
+	"github.com/vasi/go-qcow2/bio"
 	"golang.org/x/net/context"
 )
 
@@ -56,10 +57,16 @@ func main() {
 
 	q, err := qcow2.Open(f)
 	if err != nil {
+		bio.Trace(err)
 		log.Fatal(err)
 	}
 	defer q.Close()
-	guest := q.Guest()
+
+	guest, err := q.Guest()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer guest.Close()
 
 	conn, err := fuse.Mount(
 		os.Args[2],

@@ -1,6 +1,10 @@
 package qcow2
 
-import "io"
+import (
+	"io"
+
+	"github.com/vasi/go-qcow2/bio"
+)
 
 // Qcow2 represents a qcow2 file
 type Qcow2 interface {
@@ -8,7 +12,7 @@ type Qcow2 interface {
 
 	Version() int
 
-	Guest() Guest
+	Guest() (Guest, error)
 	ClusterSize() int
 
 	Snapshots() ([]Snapshot, error)
@@ -19,19 +23,22 @@ type qcow2 struct {
 }
 
 // Open a qcow2 file
-func Open(rw ReaderWriterAt) (Qcow2, error) {
-	q := &qcow2{}
-	q.header = &headerImpl{}
-	if err := q.header.open(rw); err != nil {
-		return nil, err
-	}
-	return q, nil
+func Open(rw bio.ReaderWriterAt) (q Qcow2, err error) {
+	var qi *qcow2
+	err = bio.BacktraceWrap(func() {
+		qi = &qcow2{}
+		qi.header = &headerImpl{}
+		qi.header.open(rw)
+	})
+	return qi, err
 }
 
-func (q *qcow2) Guest() Guest {
-	g := &guestImpl{}
-	g.open(q.header, q.refcounts(), q.header.l1Offset(), q.header.size())
-	return g
+func (q *qcow2) Guest() (g Guest, err error) {
+	err = bio.BacktraceWrap(func() {
+		g = &guestImpl{}
+		g.open(q.header, q.refcounts(), q.header.l1Offset(), q.header.size())
+	})
+	return
 }
 
 func (q *qcow2) ClusterSize() int {
@@ -39,11 +46,14 @@ func (q *qcow2) ClusterSize() int {
 }
 
 func (q *qcow2) Close() error {
-	return q.header.close()
+	return nil
 }
 
-func (q *qcow2) Snapshots() ([]Snapshot, error) {
-	return readSnapshots(q.header)
+func (q *qcow2) Snapshots() (snaps []Snapshot, err error) {
+	err = bio.BacktraceWrap(func() {
+		snaps = readSnapshots(q.header)
+	})
+	return
 }
 
 func (q *qcow2) refcounts() refcounts {

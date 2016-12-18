@@ -1,18 +1,18 @@
 package qcow2
 
 import (
-	"bytes"
-	"encoding/binary"
-	"errors"
 	"io"
 	"math"
 	"time"
+
+	"github.com/timtadh/data-structures/exc"
+	"github.com/vasi/go-qcow2/bio"
 )
 
 // A Snapshot represents a snapshot of a qcow2 state
 type Snapshot interface {
-	Guest() Guest
-	VMState() Guest
+	Guest() (Guest, error)
+	VMState() (Guest, error)
 
 	GuestSize() int64
 	VMStateSize() int64
@@ -50,14 +50,14 @@ type snapshotImpl struct {
 	unknownExtra []byte
 }
 
-func (s *snapshotImpl) Guest() Guest {
+func (s *snapshotImpl) Guest() (Guest, error) {
 	// TODO
-	return nil
+	return nil, nil
 }
 
-func (s *snapshotImpl) VMState() Guest {
+func (s *snapshotImpl) VMState() (Guest, error) {
 	// TODO
-	return nil
+	return nil, nil
 }
 
 func (s *snapshotImpl) GuestSize() int64 {
@@ -84,34 +84,28 @@ func (s *snapshotImpl) GuestUptime() int64 {
 	return s.uptime
 }
 
-func readSnapshots(h header) (snaps []Snapshot, err error) {
-	snaps = make([]Snapshot, 0)
+func readSnapshots(h header) []Snapshot {
+	snaps := make([]Snapshot, 0)
 	if h.snapshotsOffset() == 0 {
-		return
+		return snaps
 	}
 
-	var snap *snapshotImpl
 	off := h.snapshotsOffset()
-	r := io.NewSectionReader(h.io(), off, math.MaxInt64-off)
+	r := bio.NewReaderSection(h.io(), off, math.MaxInt64-off)
 	for i := 0; i < int(h.snapshotsCount()); i++ {
-		if snap, err = readSnapshot(h, r); err != nil {
-			return
-		}
-		snaps = append(snaps, snap)
+		snaps = append(snaps, readSnapshot(h, r))
 	}
-	return
+	return snaps
 }
 
-func readSnapshot(h header, r *io.SectionReader) (snap *snapshotImpl, err error) {
+func readSnapshot(h header, r *bio.SequentialReader) *snapshotImpl {
 	var sh snapshotHeader
-	if err = binary.Read(r, binary.BigEndian, &sh); err != nil {
-		return
-	}
+	r.ReadData(&sh)
 	if h.version() >= 3 && sh.ExtraSize < 16 {
-		return nil, errors.New("Too short snapshot data for version 3")
+		exc.Throwf("Too short snapshot data for version 3")
 	}
 
-	snap = &snapshotImpl{
+	snap := &snapshotImpl{
 		header:      h,
 		l1Position:  int64(sh.L1TableOffset),
 		l1Entries:   int(sh.L1Size),
@@ -121,59 +115,25 @@ func readSnapshot(h header, r *io.SectionReader) (snap *snapshotImpl, err error)
 		guestSize:   h.size(),
 	}
 
-	buf := make([]byte, sh.ExtraSize)
-	if _, err = io.ReadFull(r, buf); err != nil {
-		return
-	}
-	extra := bytes.NewBuffer(buf)
-	if err = snap.readExtra(extra); err != nil {
-		return
-	}
-	snap.unknownExtra = extra.Bytes()
-
-	buf = make([]byte, sh.IDSize)
-	if _, err = io.ReadFull(r, buf); err != nil {
-		return
-	}
-	snap.id = string(buf)
-	buf = make([]byte, sh.NameSize)
-	if _, err = io.ReadFull(r, buf); err != nil {
-		return
-	}
-	snap.name = string(buf)
-
-	// 8-byte alignment
-	cur, err := r.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return
-	}
-	if cur%8 != 0 {
-		if _, err = r.Seek(8-cur%8, io.SeekCurrent); err != nil {
-			return
-		}
-	}
-
-	return
+	snap.readExtra(r.SubReader(int64(sh.ExtraSize)))
+	snap.id = string(r.ReadNewBuf(int(sh.IDSize)))
+	snap.name = string(r.ReadNewBuf(int(sh.NameSize)))
+	r.Align(8)
+	return snap
 }
 
-func (s *snapshotImpl) readExtra(b *bytes.Buffer) (err error) {
-	var v uint64
+func (s *snapshotImpl) readExtra(r *bio.SequentialReader) {
+	exc.Try(func() {
+		s.vmStateSize = int64(r.ReadUint64())
+		s.guestSize = int64(r.ReadUint64())
+	}).Catch(&exc.Exception{}, func(t exc.Throwable) {
+		if t.Exc().Errors[0].Err == io.EOF {
+			exc.Rethrow(t, exc.Errorf("Reading snapshot extra data"))
+		}
+	}).Unwind()
 
-	if b.Len() < 8 {
-		return
+	rem := r.Remain()
+	if rem > 0 {
+		s.unknownExtra = r.ReadNewBuf(int(rem))
 	}
-	if err = binary.Read(b, binary.BigEndian, &v); err != nil {
-		return
-	}
-	s.vmStateSize = int64(v)
-
-	if b.Len() < 8 {
-		return
-	}
-	if err = binary.Read(b, binary.BigEndian, &v); err != nil {
-		return
-	}
-	s.guestSize = int64(v)
-
-	return nil
 }
