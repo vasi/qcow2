@@ -258,7 +258,7 @@ func (h *headerImpl) checkIncompatibleFeatures() {
 func (h *headerImpl) write() {
 	h.v3.AutoclearFeatures &= autoclearKnown
 
-	w := eio.NewBinaryWriter(h.bio, 0)
+	w := eio.NewSequentialWriter(h.bio, 0)
 	w.WriteData(h.v2)
 	w.WriteData(h.v3)
 	if h.extraHeader != nil {

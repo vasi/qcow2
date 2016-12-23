@@ -241,8 +241,7 @@ func (r *refcountsImpl) findFreeClusters(pipe *eio.Pipeline) <-chan int64 {
 			}
 		}
 
-		var i int64
-		for i = rc.idx; true; i++ {
+		for i := rc.idx; true; i++ {
 			if r.refcount(i) == 0 {
 				select {
 				case <-pipe.Done():
